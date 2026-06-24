@@ -8,8 +8,17 @@ print("model created") #動作確認
 import numpy as np
 
 # データ作成（100個のデータ）
-x = np.random.rand(100, 1)  # 入力データ（0〜1のランダム）
-y = 3 * x + 2               # 出力データ（関係式）
+x = np.random.rand(100, 1)　# 入力データ（0〜1のランダム）
+y = 3 * x + 2　＃# 出力データ（関係式）
+
+# データ分割（80%:train, 20%:test）
+split_index = int(0.8 * len(x))
+
+x_train_np = x[:split_index]
+y_train_np = y[:split_index]
+
+x_test_np = x[split_index:]
+y_test_np = y[split_index:]
 
 # torch用に変換
 x_train = torch.tensor(x, dtype=torch.float32)
