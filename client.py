@@ -16,3 +16,21 @@ x_train = torch.tensor(x, dtype=torch.float32)
 y_train = torch.tensor(y, dtype=torch.float32)
 
 print("data created")
+
+# 学習の準備
+optimizer = torch.optim.SGD(model.parameters(), lr=0.1) #torch.optim.SGD モデルをどう賢くするかのルール
+loss_fn = nn.MSELoss() #誤差の測り方
+
+# 学習ループ
+for epoch in range(10): #学習回数10回に設定
+    optimizer.zero_grad()  # 勾配リセット
+    
+    y_pred = model(x_train)  # モデルの予測　lossが小さくなることで学習が成功したことになる
+    
+    loss = loss_fn(y_pred, y_train)  # 予測と正解の誤差
+    
+    loss.backward()  # 誤差をもとに，どこが間違ってるか計算
+    
+    optimizer.step()  # パラメータ更新
+    
+    print(f"epoch {epoch}, loss: {loss.item()}")
