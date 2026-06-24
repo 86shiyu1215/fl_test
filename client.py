@@ -8,7 +8,7 @@ print("model created") #動作確認
 import numpy as np
 
 # データ作成（100個のデータ）
-x = np.random.rand(10, 1) # 入力データ（0〜1のランダム）
+x = np.random.rand(100, 1) # 入力データ（0〜1のランダム）
 y = 3 * x + 2 # 出力データ（関係式）
 
 # データ分割（80%:train, 20%:test）
@@ -67,7 +67,7 @@ class FlowerClient(fl.client.NumPyClient):
         self.set_parameters(parameters)
 
         # 学習（今までのコード）
-        for epoch in range(10):
+        for epoch in range(50):
             optimizer.zero_grad()
             y_pred = model(x_train)
             loss = loss_fn(y_pred, y_train)
