@@ -21,8 +21,11 @@ x_test_np = x[split_index:]
 y_test_np = y[split_index:]
 
 # torch用に変換
-x_train = torch.tensor(x, dtype=torch.float32)
-y_train = torch.tensor(y, dtype=torch.float32)
+x_train = torch.tensor(x_train_np, dtype=torch.float32)
+y_train = torch.tensor(y_train_np, dtype=torch.float32)
+
+x_test = torch.tensor(x_test_np, dtype=torch.float32)
+y_test = torch.tensor(y_test_np, dtype=torch.float32)
 
 print("data created")
 
@@ -43,3 +46,10 @@ for epoch in range(50): #学習回数10回に設定
     optimizer.step()  # パラメータ更新
     
     print(f"epoch {epoch}, loss: {loss.item()}")
+
+# テストデータで評価
+with torch.no_grad():
+    y_test_pred = model(x_test)
+    test_loss = loss_fn(y_test_pred, y_test)
+
+print(f"Test loss: {test_loss.item()}")
