@@ -7,9 +7,17 @@ model = nn.Linear(1, 1)  #入力１つ，出力１つ，のモデルで行くで
 print("model created") #動作確認
 import numpy as np
 
-# データ作成（100個のデータ）
-x = np.random.rand(100, 1) # 入力データ（0〜1のランダム）
-y = 3 * x + 2 # 出力データ（関係式）
+x = np.random.rand(100, 1)
+
+# clientごとにデータ分割
+if client_id == 1:
+    x = x[x < 0.33]
+elif client_id == 2:
+    x = x[(x >= 0.33) & (x < 0.66)]
+else:
+    x = x[x >= 0.66]
+
+y = 3 * x + 2
 
 # データ分割（80%:train, 20%:test）
 split_index = int(0.8 * len(x))
@@ -91,3 +99,8 @@ fl.client.start_numpy_client(
     server_address="127.0.0.1:8080",
     client=FlowerClient(),
 )
+
+import sys
+
+# client番号を取得　client数を増やす段階
+client_id = int(sys.argv[1])
