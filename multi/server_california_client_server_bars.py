@@ -59,6 +59,11 @@ def evaluate_config(server_round):
 # Strategy設定
 # =========================
 strategy = fl.server.strategy.FedAvg(
+    fraction_fit=1.0,
+    fraction_evaluate=1.0,
+    min_fit_clients=3,
+    min_evaluate_clients=3,
+    min_available_clients=3,
     evaluate_metrics_aggregation_fn=weighted_average,
     on_evaluate_config_fn=evaluate_config,
 )
