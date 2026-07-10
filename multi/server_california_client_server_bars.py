@@ -1,3 +1,4 @@
+
 import os
 import csv
 import pandas as pd
@@ -14,17 +15,25 @@ import matplotlib.pyplot as plt
 # =========================
 NUM_ROUNDS = 80
 
+# server側のRoundごとの集約結果
 SERVER_CSV = "server_metrics_california_round80.csv"
+SERVER_PNG = "server_metrics_california_round80.png"
+
+# client側のRoundごとの評価結果
 CLIENT1_CSV = "client1_metrics_california.csv"
 CLIENT2_CSV = "client2_metrics_california.csv"
 CLIENT3_CSV = "client3_metrics_california.csv"
 
+# 最終Round後のclient/server比較結果
 FINAL_COMPARISON_CSV = "final_client_server_comparison_california.csv"
 FINAL_COMPARISON_PNG = "final_client_server_comparison_california.png"
 
+# =========================
 # 古い結果が残らないように削除
+# =========================
 for file in [
     SERVER_CSV,
+    SERVER_PNG,
     FINAL_COMPARISON_CSV,
     FINAL_COMPARISON_PNG,
 ]:
@@ -58,6 +67,7 @@ def evaluate_config(server_round):
 # =========================
 # Strategy設定
 # =========================
+# 3client全員が揃うまで待ち、fit/evaluateの両方で3client全員を使用する
 strategy = fl.server.strategy.FedAvg(
     fraction_fit=1.0,
     fraction_evaluate=1.0,
@@ -78,7 +88,7 @@ history = fl.server.start_server(
 )
 
 # =========================
-# server集約結果を保存
+# server集約結果を取得
 # =========================
 metrics = history.metrics_distributed
 
@@ -102,6 +112,9 @@ if "mae" in metrics:
 if "r2" in metrics:
     r2_values = [value for r, value in metrics["r2"]]
 
+# =========================
+# server集約結果CSV保存
+# =========================
 with open(SERVER_CSV, "w", newline="") as f:
     writer = csv.writer(f)
     writer.writerow(["round", "mse", "rmse", "mae", "r2"])
@@ -120,8 +133,6 @@ print(f"Saved: {SERVER_CSV}")
 # =========================
 # server側 Roundごとの推移グラフ保存
 # =========================
-SERVER_PNG = "server_metrics_california_round80.png"
-
 if len(rounds) > 0:
     plt.figure(figsize=(10, 8))
 
@@ -157,6 +168,8 @@ if len(rounds) > 0:
     plt.savefig(SERVER_PNG, dpi=300)
 
     print(f"Saved: {SERVER_PNG}")
+else:
+    print("No server round metrics were recorded.")
 
 # =========================
 # 最終Roundのclient/server比較表を作成
@@ -164,8 +177,9 @@ if len(rounds) > 0:
 def load_final_row(file_name, label):
     df = pd.read_csv(file_name)
 
-    # roundが-1などの初期評価を含む可能性があるため、最大roundを取得
+    # roundが-1などの初期評価を含む可能性があるため、正のroundだけ使う
     df = df[df["round"] > 0]
+
     final_row = df.loc[df["round"].idxmax()]
 
     return {
@@ -196,7 +210,9 @@ if os.path.exists(SERVER_CSV):
 else:
     print(f"Warning: {SERVER_CSV} not found.")
 
-# 比較CSV保存
+# =========================
+# 最終Round比較CSV保存
+# =========================
 with open(FINAL_COMPARISON_CSV, "w", newline="") as f:
     writer = csv.writer(f)
     writer.writerow(["name", "round", "mse", "rmse", "mae", "r2"])
@@ -216,39 +232,42 @@ print(f"Saved: {FINAL_COMPARISON_CSV}")
 # =========================
 # client1, client2, client3, server の棒グラフ作成
 # =========================
-names = [row["name"] for row in results]
-mse_plot = [row["mse"] for row in results]
-rmse_plot = [row["rmse"] for row in results]
-mae_plot = [row["mae"] for row in results]
-r2_plot = [row["r2"] for row in results]
+if len(results) > 0:
+    names = [row["name"] for row in results]
+    mse_plot = [row["mse"] for row in results]
+    rmse_plot = [row["rmse"] for row in results]
+    mae_plot = [row["mae"] for row in results]
+    r2_plot = [row["r2"] for row in results]
 
-plt.figure(figsize=(10, 8))
+    plt.figure(figsize=(10, 8))
 
-plt.subplot(2, 2, 1)
-plt.bar(names, mse_plot)
-plt.ylabel("MSE")
-plt.title("Final Round MSE")
-plt.grid(axis="y")
+    plt.subplot(2, 2, 1)
+    plt.bar(names, mse_plot)
+    plt.ylabel("MSE")
+    plt.title("Final Round MSE")
+    plt.grid(axis="y")
 
-plt.subplot(2, 2, 2)
-plt.bar(names, rmse_plot)
-plt.ylabel("RMSE")
-plt.title("Final Round RMSE")
-plt.grid(axis="y")
+    plt.subplot(2, 2, 2)
+    plt.bar(names, rmse_plot)
+    plt.ylabel("RMSE")
+    plt.title("Final Round RMSE")
+    plt.grid(axis="y")
 
-plt.subplot(2, 2, 3)
-plt.bar(names, mae_plot)
-plt.ylabel("MAE")
-plt.title("Final Round MAE")
-plt.grid(axis="y")
+    plt.subplot(2, 2, 3)
+    plt.bar(names, mae_plot)
+    plt.ylabel("MAE")
+    plt.title("Final Round MAE")
+    plt.grid(axis="y")
 
-plt.subplot(2, 2, 4)
-plt.bar(names, r2_plot)
-plt.ylabel("R2")
-plt.title("Final Round R2")
-plt.grid(axis="y")
+    plt.subplot(2, 2, 4)
+    plt.bar(names, r2_plot)
+    plt.ylabel("R2")
+    plt.title("Final Round R2")
+    plt.grid(axis="y")
 
-plt.tight_layout()
-plt.savefig(FINAL_COMPARISON_PNG, dpi=300)
+    plt.tight_layout()
+    plt.savefig(FINAL_COMPARISON_PNG, dpi=300)
 
-print(f"Saved: {FINAL_COMPARISON_PNG}")
+    print(f"Saved: {FINAL_COMPARISON_PNG}")
+else:
+    print("No final comparison results were recorded.")
