@@ -118,6 +118,47 @@ with open(SERVER_CSV, "w", newline="") as f:
 print(f"Saved: {SERVER_CSV}")
 
 # =========================
+# server側 Roundごとの推移グラフ保存
+# =========================
+SERVER_PNG = "server_metrics_california_round80.png"
+
+if len(rounds) > 0:
+    plt.figure(figsize=(10, 8))
+
+    plt.subplot(2, 2, 1)
+    plt.plot(rounds, mse_values, marker="o")
+    plt.xlabel("Round")
+    plt.ylabel("MSE")
+    plt.title("Server Aggregated MSE")
+    plt.grid(True)
+
+    plt.subplot(2, 2, 2)
+    plt.plot(rounds, rmse_values, marker="o")
+    plt.xlabel("Round")
+    plt.ylabel("RMSE")
+    plt.title("Server Aggregated RMSE")
+    plt.grid(True)
+
+    plt.subplot(2, 2, 3)
+    plt.plot(rounds, mae_values, marker="o")
+    plt.xlabel("Round")
+    plt.ylabel("MAE")
+    plt.title("Server Aggregated MAE")
+    plt.grid(True)
+
+    plt.subplot(2, 2, 4)
+    plt.plot(rounds, r2_values, marker="o")
+    plt.xlabel("Round")
+    plt.ylabel("R2")
+    plt.title("Server Aggregated R2")
+    plt.grid(True)
+
+    plt.tight_layout()
+    plt.savefig(SERVER_PNG, dpi=300)
+
+    print(f"Saved: {SERVER_PNG}")
+
+# =========================
 # 最終Roundのclient/server比較表を作成
 # =========================
 def load_final_row(file_name, label):
