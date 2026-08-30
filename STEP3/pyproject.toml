@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=70.0"]
+build-backend = "setuptools.build_meta"
+
+
+[project]
+name = "step3-cof-fl"
+version = "1.0.0"
+description = "DNN federated learning for DLC coefficient of friction prediction"
+requires-python = ">=3.12"
+dependencies = [
+    "flwr[simulation]==1.31.0",
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "torch",
+]
+
+
+[tool.setuptools]
+py-modules = [
+    "model",
+    "task",
+    "client_app",
+    "server_app",
+]
+
+
+[tool.flwr.app]
+publisher = "shiyu"
+
+
+[tool.flwr.app.components]
+serverapp = "server_app:app"
+clientapp = "client_app:app"
+
+
+[tool.flwr.app.config]
+
+# Federated Learning
+num-server-rounds = 30
+fraction-train = 1.0
+
+# Local DNN training
+local-epochs = 10
+learning-rate = 0.001
+batch-size = 7
+
+# Standalone simulation data paths
+data-dir = "/home/shiyu/fl_test/STEP3/data/splits"
+test-data-path = "/home/shiyu/fl_test/STEP3/data/splits/test.csv"
+
+# Result output
+result-dir = "/home/shiyu/fl_test/STEP3/results"
+
+
+[tool.flwr.federations]
+default = "local-simulation"
+
+
+[tool.flwr.federations.local-simulation]
+options.num-supernodes = 3
+options.backend.client-resources.num-cpus = 1
+options.backend.client-resources.num-gpus = 0.0
