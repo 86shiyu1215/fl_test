@@ -1,7 +1,8 @@
-import json
-import numpy as np
-
 from pathlib import Path
+import json
+
+import numpy as np
+import torch
 
 from flwr.app import (
     ArrayRecord,
@@ -10,16 +11,18 @@ from flwr.app import (
     MetricRecord,
     RecordDict,
 )
+
 from flwr.clientapp import ClientApp
 
+
 from model import CoFDNN
+
 from task import (
-    RANDOM_SEED,
+    apply_zscore,
     create_dataloader,
     load_csv_data,
     set_seed,
     train_model,
-    apply_zscore,
 )
 
 
@@ -31,199 +34,219 @@ app = ClientApp()
 
 
 # ============================================================
-# Clientが使用するCSVを決める
-# ============================================================
-
-def get_train_csv(context: Context) -> Path:
-    """
-    Standalone simulation:
-        partition-id 0 -> client1_train.csv
-        partition-id 1 -> client2_train.csv
-        partition-id 2 -> client3_train.csv
-
-    Future deployment:
-        各研究拠点で node-config に data-path を渡せば、
-        その拠点のローカルCSVだけを読み込める。
-    """
-
-    # 将来の実機分散用
-    if "data-path" in context.node_config:
-        return Path(
-            str(context.node_config["data-path"])
-        )
-
-    # 今回のB上でのSimulation用
-    partition_id = int(
-        context.node_config["partition-id"]
-    )
-
-    client_id = partition_id + 1
-
-    data_dir = Path(
-        str(context.run_config["data-dir"])
-    )
-
-    return (
-        data_dir
-        / f"client{client_id}_train.csv"
-    )
-
-
-# ============================================================
-# ローカル学習
+# Client側の学習処理
 # ============================================================
 
 @app.train()
 def train(
     msg: Message,
     context: Context,
-):
-    """
-    ServerからGlobal modelを受信し、
-    各Clientの35件で10 epoch学習して、
-    更新したモデル重みをServerへ返す。
-    """
+) -> Message:
 
-    # --------------------------------------------------------
+    # ========================================================
     # Client ID
-    # --------------------------------------------------------
+    #
+    # partition-id
+    # 0 -> Client1
+    # 1 -> Client2
+    # 2 -> Client3
+    # ========================================================
 
     partition_id = int(
-        context.node_config["partition-id"]
+        context.node_config[
+            "partition-id"
+        ]
     )
 
-    client_id = partition_id + 1
-
-    # --------------------------------------------------------
-    # Serverから送られた学習条件
-    # --------------------------------------------------------
-
-    config = msg.content["config"]
-
-    learning_rate = float(
-        config["learning-rate"]
+    client_id = (
+        partition_id
+        + 1
     )
 
-    local_epochs = int(
-        config["local-epochs"]
-    )
-
-    batch_size = int(
-        config["batch-size"]
-    )
+    # ========================================================
+    # Round番号
+    # ========================================================
 
     server_round = int(
-        config["server-round"]
+        msg.content[
+            "config"
+        ].get(
+            "server-round",
+            0,
+        )
     )
 
-    # --------------------------------------------------------
-    # 再現性のためseedを固定
+    # ========================================================
+    # 再現性のためseed設定
     #
-    # Client・Roundごとに少し変えることで
-    # batchの並びは毎Round変化するが、
-    # 同じ実験をすれば再現できる。
-    # --------------------------------------------------------
+    # Clientごと・Roundごとに少し変える
+    # ========================================================
 
-    client_seed = (
-        RANDOM_SEED
-        + client_id * 100
+    seed = (
+        42
+        + client_id * 1000
         + server_round
     )
 
-    set_seed(client_seed)
-
-    # --------------------------------------------------------
-    # 各Clientの35件を読み込む
-    # --------------------------------------------------------
-
-    train_csv = get_train_csv(context)
-
-    x_train, y_train, _ = load_csv_data(
-        train_csv
+    set_seed(
+        seed
     )
-    # ============================================================
-# 標準化方式
-# ============================================================
 
-standardization = str(
-    train_config.get(
-        "standardization",
-        "none",
-    )
-)
+    # ========================================================
+    # ClientのCSVパス
+    # ========================================================
 
-# ============================================================
-# Z-score標準化
-#
-# Serverから受け取った
-# 共通mean / scaleを全Clientで使用する
-# ============================================================
+    if (
+        "data-path"
+        in context.node_config
+    ):
 
-if standardization == "zscore":
-
-    scaler_mean = np.asarray(
-        json.loads(
+        csv_path = Path(
             str(
-                train_config[
-                    "zscore-mean-json"
+                context.node_config[
+                    "data-path"
                 ]
             )
-        ),
-        dtype=np.float32,
-    )
+        )
 
-    scaler_scale = np.asarray(
-        json.loads(
+    else:
+
+        data_dir = Path(
             str(
-                train_config[
-                    "zscore-scale-json"
+                context.run_config[
+                    "data-dir"
                 ]
             )
-        ),
-        dtype=np.float32,
+        )
+
+        csv_path = (
+            data_dir
+            / f"client{client_id}_train.csv"
+        )
+
+    # ========================================================
+    # Clientデータ読み込み
+    # ========================================================
+
+    x_train, y_train, _ = (
+        load_csv_data(
+            csv_path
+        )
     )
 
-    x_train = apply_zscore(
-        x_train,
-        scaler_mean,
-        scaler_scale,
+    # ========================================================
+    # Serverから送られた学習条件
+    # ========================================================
+
+    train_config = msg.content[
+        "config"
+    ]
+
+    learning_rate = float(
+        train_config[
+            "learning-rate"
+        ]
     )
 
-elif standardization != "none":
-
-    raise ValueError(
-        f"Unknown standardization: "
-        f"{standardization}"
+    local_epochs = int(
+        train_config[
+            "local-epochs"
+        ]
     )
 
-    # --------------------------------------------------------
-    # 7件 × 5 batch
-    # --------------------------------------------------------
+    batch_size = int(
+        train_config[
+            "batch-size"
+        ]
+    )
+
+    # ========================================================
+    # 標準化方式
+    # ========================================================
+
+    standardization = str(
+        train_config.get(
+            "standardization",
+            "none",
+        )
+    )
+
+    # ========================================================
+    # Z-score標準化
+    #
+    # ServerがTRAIN105件から求めた
+    # 共通mean / scaleを全Clientで使用する
+    # ========================================================
+
+    if standardization == "zscore":
+
+        scaler_mean = np.asarray(
+            json.loads(
+                str(
+                    train_config[
+                        "zscore-mean-json"
+                    ]
+                )
+            ),
+            dtype=np.float32,
+        )
+
+        scaler_scale = np.asarray(
+            json.loads(
+                str(
+                    train_config[
+                        "zscore-scale-json"
+                    ]
+                )
+            ),
+            dtype=np.float32,
+        )
+
+        x_train = apply_zscore(
+            x_train,
+            scaler_mean,
+            scaler_scale,
+        )
+
+    elif standardization != "none":
+
+        raise ValueError(
+            f"Unknown standardization: "
+            f"{standardization}"
+        )
+
+    # ========================================================
+    # DataLoader
+    # ========================================================
 
     train_loader = create_dataloader(
         x_train,
         y_train,
         batch_size=batch_size,
         shuffle=True,
-        seed=client_seed,
     )
 
-    # --------------------------------------------------------
-    # DNNを作成
-    # --------------------------------------------------------
+    # ========================================================
+    # Global modelを受け取る
+    # ========================================================
 
     model = CoFDNN()
 
-    # Serverから受け取ったGlobal modelの重みをセット
-    model.load_state_dict(
-        msg.content[
-            "arrays"
-        ].to_torch_state_dict()
+    arrays = msg.content[
+        "arrays"
+    ]
+
+    state_dict = (
+        arrays.to_torch_state_dict()
     )
 
-    # --------------------------------------------------------
+    model.load_state_dict(
+        state_dict
+    )
+
+    # ========================================================
     # Local training
-    # --------------------------------------------------------
+    # ========================================================
 
     epoch_losses = train_model(
         model,
@@ -239,35 +262,45 @@ elif standardization != "none":
     print(
         f"Client {client_id} | "
         f"Round {server_round} | "
-        f"Train Loss = {final_train_loss:.8f}"
+        f"Train Loss = "
+        f"{final_train_loss:.8f}"
     )
 
-    # --------------------------------------------------------
-    # 学習後のDNN重み
-    # --------------------------------------------------------
+    # ========================================================
+    # 学習後の重み
+    # ========================================================
 
     model_record = ArrayRecord(
         model.state_dict()
     )
 
-    # --------------------------------------------------------
-    # Serverへ返す情報
-    #
-    # num-examples=35をFedAvgの重みに使う。
-    # 今回は全Client35件なので実質等重み。
-    # --------------------------------------------------------
+    # ========================================================
+    # Serverへ返すMetric
+    # ========================================================
 
     metrics = MetricRecord(
         {
-            "train_loss": final_train_loss,
-            "num-examples": len(x_train),
+            "train_loss": (
+                final_train_loss
+            ),
+            "num-examples": (
+                len(x_train)
+            ),
         }
     )
 
+    # ========================================================
+    # Serverへ返す内容
+    # ========================================================
+
     content = RecordDict(
         {
-            "arrays": model_record,
-            "metrics": metrics,
+            "arrays": (
+                model_record
+            ),
+            "metrics": (
+                metrics
+            ),
         }
     )
 
