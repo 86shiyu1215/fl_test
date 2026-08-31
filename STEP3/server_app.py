@@ -5,7 +5,7 @@ import torch
 
 # ============================================================
 # matplotlib
-# Ubuntuのサーバー環境でも画面表示なしでPNG保存できるようにする
+# Ubuntuでも画面表示なしでPNG保存できるようにする
 # ============================================================
 
 import matplotlib
@@ -39,6 +39,10 @@ from task import (
     set_seed,
 )
 
+from experiment_utils import (
+    initialize_experiment,
+)
+
 
 # ============================================================
 # Flower ServerApp
@@ -59,9 +63,9 @@ def main(
 
     set_seed()
 
-    # --------------------------------------------------------
-    # pyproject.tomlから設定を取得
-    # --------------------------------------------------------
+    # ========================================================
+    # pyproject.tomlから実験条件を取得
+    # ========================================================
 
     num_rounds = int(
         context.run_config[
@@ -101,29 +105,171 @@ def main(
         )
     )
 
-    result_dir = Path(
-        str(
-            context.run_config[
-                "result-dir"
-            ]
+    # --------------------------------------------------------
+    # experiment-id
+    #
+    # pyproject.tomlに設定がなければ
+    # no-scaling baselineとして保存
+    # --------------------------------------------------------
+
+    experiment_id = str(
+        context.run_config.get(
+            "experiment-id",
+            "exp_001_no_scaling_baseline",
         )
     )
 
-    result_dir.mkdir(
-        parents=True,
-        exist_ok=True,
+    # --------------------------------------------------------
+    # standardization
+    #
+    # 現在は none
+    # 後で zscore に変更する
+    # --------------------------------------------------------
+
+    standardization = str(
+        context.run_config.get(
+            "standardization",
+            "none",
+        )
     )
 
-    # --------------------------------------------------------
-    # TEST 32件を読み込む
-    #
-    # この32件は学習には使用しない。
-    # Global modelの評価だけに使用する。
-    # --------------------------------------------------------
+    # ========================================================
+    # STEP3フォルダ
+    # ========================================================
+
+    base_dir = Path(
+        __file__
+    ).resolve().parent
+
+    # ========================================================
+    # TEST32件を読み込む
+    # ========================================================
 
     x_test, y_test, test_df = load_csv_data(
         test_csv
     )
+
+    # ========================================================
+    # 今回の実験条件
+    #
+    # config.csvとして自動保存する
+    # ========================================================
+
+    experiment_config = {
+        "experiment_id": (
+            experiment_id
+        ),
+
+        "standardization": (
+            standardization
+        ),
+
+        "model": (
+            "5-8-4-1"
+        ),
+
+        "input_features": (
+            5
+        ),
+
+        "activation": (
+            "ReLU"
+        ),
+
+        "output_activation": (
+            "None"
+        ),
+
+        "optimizer": (
+            "Adam"
+        ),
+
+        "loss_function": (
+            "MSELoss"
+        ),
+
+        "learning_rate": (
+            learning_rate
+        ),
+
+        "batch_size": (
+            batch_size
+        ),
+
+        "local_epochs": (
+            local_epochs
+        ),
+
+        "server_rounds": (
+            num_rounds
+        ),
+
+        "num_clients": (
+            3
+        ),
+
+        "samples_client1": (
+            35
+        ),
+
+        "samples_client2": (
+            35
+        ),
+
+        "samples_client3": (
+            35
+        ),
+
+        "test_samples": (
+            len(x_test)
+        ),
+
+        "aggregation": (
+            "FedAvg"
+        ),
+
+        "fraction_train": (
+            fraction_train
+        ),
+
+        "random_seed": (
+            42
+        ),
+
+        "test_data_path": (
+            str(test_csv)
+        ),
+    }
+
+    # ========================================================
+    # 実験保存フォルダを自動作成
+    #
+    # config.csv
+    # code_snapshot/
+    # results/
+    #
+    # を作成する
+    # ========================================================
+
+    experiment_info = initialize_experiment(
+        base_dir=base_dir,
+        experiment_id=experiment_id,
+        config=experiment_config,
+    )
+
+    # --------------------------------------------------------
+    # この実験専用のresultsフォルダ
+    # --------------------------------------------------------
+
+    result_dir = Path(
+        experiment_info[
+            "result_dir"
+        ]
+    )
+
+    # ========================================================
+    # 実験開始表示
+    # ========================================================
 
     print(
         "========================================"
@@ -134,31 +280,47 @@ def main(
     )
 
     print(
-        "Standardization: OFF"
-    )
-
-    print(
         "========================================"
     )
 
     print(
-        f"Test samples : {len(x_test)}"
+        f"Experiment ID  : "
+        f"{experiment_id}"
     )
 
     print(
-        f"Rounds       : {num_rounds}"
+        f"Standardization: "
+        f"{standardization}"
     )
 
     print(
-        f"Local epochs : {local_epochs}"
+        f"Test samples   : "
+        f"{len(x_test)}"
     )
 
     print(
-        f"Batch size   : {batch_size}"
+        f"Rounds         : "
+        f"{num_rounds}"
     )
 
     print(
-        f"Learning rate: {learning_rate}"
+        f"Local epochs   : "
+        f"{local_epochs}"
+    )
+
+    print(
+        f"Batch size     : "
+        f"{batch_size}"
+    )
+
+    print(
+        f"Learning rate  : "
+        f"{learning_rate}"
+    )
+
+    print(
+        f"Result dir     : "
+        f"{result_dir}"
     )
 
     print()
@@ -181,14 +343,14 @@ def main(
 
     metrics_csv_path = (
         result_dir
-        / "server_round_metrics_no_scaling.csv"
+        / "server_round_metrics.csv"
     )
 
     # ========================================================
     # Global model評価関数
     #
     # Round 0
-    #   FL開始前
+    #   学習開始前
     #
     # Round 1～30
     #   FedAvg後
@@ -215,17 +377,29 @@ def main(
             "round": int(
                 server_round
             ),
+
             "mse": float(
-                metrics["mse"]
+                metrics[
+                    "mse"
+                ]
             ),
+
             "rmse": float(
-                metrics["rmse"]
+                metrics[
+                    "rmse"
+                ]
             ),
+
             "mae": float(
-                metrics["mae"]
+                metrics[
+                    "mae"
+                ]
             ),
+
             "r2": float(
-                metrics["r2"]
+                metrics[
+                    "r2"
+                ]
             ),
         }
 
@@ -234,10 +408,10 @@ def main(
         )
 
         # ----------------------------------------------------
-        # 毎Round CSVを更新
+        # 毎Round保存
         #
-        # 実験途中で停止しても
-        # そこまでの結果を残す
+        # 途中停止しても
+        # そこまでの結果が残る
         # ----------------------------------------------------
 
         pd.DataFrame(
@@ -248,26 +422,42 @@ def main(
         )
 
         print(
-            f"Global Round {server_round:2d} | "
-            f"MSE={metrics['mse']:.8f} | "
-            f"RMSE={metrics['rmse']:.8f} | "
-            f"MAE={metrics['mae']:.8f} | "
-            f"R2={metrics['r2']:.8f}"
+            f"Global Round "
+            f"{server_round:2d} | "
+            f"MSE="
+            f"{metrics['mse']:.8f} | "
+            f"RMSE="
+            f"{metrics['rmse']:.8f} | "
+            f"MAE="
+            f"{metrics['mae']:.8f} | "
+            f"R2="
+            f"{metrics['r2']:.8f}"
         )
 
         return MetricRecord(
             {
                 "mse": float(
-                    metrics["mse"]
+                    metrics[
+                        "mse"
+                    ]
                 ),
+
                 "rmse": float(
-                    metrics["rmse"]
+                    metrics[
+                        "rmse"
+                    ]
                 ),
+
                 "mae": float(
-                    metrics["mae"]
+                    metrics[
+                        "mae"
+                    ]
                 ),
+
                 "r2": float(
-                    metrics["r2"]
+                    metrics[
+                        "r2"
+                    ]
                 ),
             }
         )
@@ -282,10 +472,9 @@ def main(
             fraction_train
         ),
 
-        # Client側では評価しない
         fraction_evaluate=0.0,
 
-        # 毎Round必ず3 Client参加
+        # 毎Round3 Clientすべて参加
         min_train_nodes=3,
 
         min_available_nodes=3,
@@ -300,9 +489,11 @@ def main(
             "learning-rate": (
                 learning_rate
             ),
+
             "local-epochs": (
                 local_epochs
             ),
+
             "batch-size": (
                 batch_size
             ),
@@ -322,7 +513,7 @@ def main(
     )
 
     # ========================================================
-    # 最終Global model保存
+    # 最終Global model
     # ========================================================
 
     final_state_dict = (
@@ -331,7 +522,7 @@ def main(
 
     model_path = (
         result_dir
-        / "global_model_no_scaling.pt"
+        / "global_model.pt"
     )
 
     torch.save(
@@ -340,7 +531,7 @@ def main(
     )
 
     # ========================================================
-    # Client側Train LossをCSV保存
+    # Client側 Train Loss
     # ========================================================
 
     train_loss_rows = []
@@ -354,6 +545,7 @@ def main(
                 "round": int(
                     server_round
                 ),
+
                 "train_loss": float(
                     metrics[
                         "train_loss"
@@ -364,7 +556,7 @@ def main(
 
     train_loss_csv_path = (
         result_dir
-        / "client_train_loss_no_scaling.csv"
+        / "client_train_loss.csv"
     )
 
     pd.DataFrame(
@@ -394,8 +586,10 @@ def main(
 
     # ========================================================
     # TEST32件
-    # 実測CoF vs 予測CoF
-    # CSV保存
+    #
+    # Actual CoF
+    # Predicted CoF
+    # Residual
     # ========================================================
 
     prediction_df = pd.DataFrame(
@@ -418,13 +612,6 @@ def main(
         }
     )
 
-    # --------------------------------------------------------
-    # 残差
-    #
-    # residual
-    # = Actual - Predicted
-    # --------------------------------------------------------
-
     prediction_df[
         "residual"
     ] = (
@@ -439,7 +626,7 @@ def main(
 
     prediction_csv_path = (
         result_dir
-        / "test_predictions_no_scaling.csv"
+        / "test_predictions.csv"
     )
 
     prediction_df.to_csv(
@@ -449,9 +636,7 @@ def main(
 
     # ========================================================
     # Actual CoF vs Predicted CoF
-    #
-    # TEST32件の散布図
-    # ＋ 理想線 y = x
+    # 散布図 + y=x
     # ========================================================
 
     actual = prediction_df[
@@ -461,11 +646,6 @@ def main(
     predicted = prediction_df[
         "predicted_cof"
     ].to_numpy()
-
-    # --------------------------------------------------------
-    # ActualとPredictedの両方を含む
-    # 共通の軸範囲を作る
-    # --------------------------------------------------------
 
     plot_min = min(
         actual.min(),
@@ -493,15 +673,13 @@ def main(
     )
 
     # --------------------------------------------------------
-    # 散布図を作成
+    # Scatter plot
     # --------------------------------------------------------
 
     plt.figure(
         figsize=(6, 6)
     )
 
-    # TEST32件の
-    # Actual vs Predicted
     plt.scatter(
         actual,
         predicted,
@@ -509,10 +687,7 @@ def main(
     )
 
     # --------------------------------------------------------
-    # 理想線
-    #
-    # Actual = Predicted
-    # y = x
+    # 理想線 y=x
     # --------------------------------------------------------
 
     plt.plot(
@@ -528,10 +703,6 @@ def main(
         label="y = x",
     )
 
-    # --------------------------------------------------------
-    # 軸
-    # --------------------------------------------------------
-
     plt.xlabel(
         "Actual CoF"
     )
@@ -540,21 +711,12 @@ def main(
         "Predicted CoF"
     )
 
-    # --------------------------------------------------------
-    # タイトル
-    # R²も表示
-    # --------------------------------------------------------
-
     plt.title(
         "Actual vs Predicted CoF\n"
-        f"No Standardization, "
+        f"{experiment_id}, "
         f"R² = "
         f"{final_metrics['r2']:.3f}"
     )
-
-    # --------------------------------------------------------
-    # x軸・y軸を同じ範囲にする
-    # --------------------------------------------------------
 
     plt.xlim(
         plot_min,
@@ -565,13 +727,6 @@ def main(
         plot_min,
         plot_max,
     )
-
-    # --------------------------------------------------------
-    # x軸とy軸の縮尺を1:1にする
-    #
-    # y=xからの距離を
-    # 視覚的に正しく見るため重要
-    # --------------------------------------------------------
 
     plt.gca().set_aspect(
         "equal",
@@ -586,13 +741,9 @@ def main(
 
     plt.tight_layout()
 
-    # --------------------------------------------------------
-    # PNG保存
-    # --------------------------------------------------------
-
     scatter_path = (
         result_dir
-        / "actual_vs_predicted_no_scaling.png"
+        / "actual_vs_predicted.png"
     )
 
     plt.savefig(
@@ -601,11 +752,10 @@ def main(
         bbox_inches="tight",
     )
 
-    # メモリ解放
     plt.close()
 
     # ========================================================
-    # 最終評価指標をCSV保存
+    # 最終評価指標CSV
     # ========================================================
 
     final_metrics_df = pd.DataFrame(
@@ -644,7 +794,7 @@ def main(
 
     final_metrics_csv_path = (
         result_dir
-        / "final_metrics_no_scaling.csv"
+        / "final_metrics.csv"
     )
 
     final_metrics_df.to_csv(
@@ -668,6 +818,13 @@ def main(
 
     print(
         "========================================"
+    )
+
+    print()
+
+    print(
+        f"Experiment ID: "
+        f"{experiment_id}"
     )
 
     print()
