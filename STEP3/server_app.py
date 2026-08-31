@@ -2,6 +2,8 @@ from pathlib import Path
 
 import pandas as pd
 import torch
+import json
+import numpy as np
 
 # ============================================================
 # matplotlib
@@ -33,7 +35,9 @@ from flwr.serverapp.strategy import FedAvg
 from model import CoFDNN
 
 from task import (
+    FEATURE_COLUMNS,
     TARGET_COLUMN,
+    apply_zscore,
     evaluate_model,
     load_csv_data,
     set_seed,
@@ -144,6 +148,109 @@ def main(
     x_test, y_test, test_df = load_csv_data(
         test_csv
     )
+    # ============================================================
+# Z-score用パラメータ
+# ============================================================
+
+scaler_mean = None
+scaler_scale = None
+
+
+# ============================================================
+# Z-score標準化
+#
+# Client1～3のTRAIN105件のみから
+# 共通mean / scaleを計算する
+#
+# TEST32件は計算に使用しない
+# ============================================================
+
+if standardization == "zscore":
+
+    split_dir = test_csv.parent
+
+    train_feature_arrays = []
+
+    for client_id in range(
+        1,
+        4,
+    ):
+
+        client_csv = (
+            split_dir
+            / f"client{client_id}_train.csv"
+        )
+
+        client_df = pd.read_csv(
+            client_csv
+        )
+
+        client_x = client_df[
+            FEATURE_COLUMNS
+        ].to_numpy(
+            dtype=np.float64
+        )
+
+        train_feature_arrays.append(
+            client_x
+        )
+
+    # --------------------------------------------------------
+    # TRAIN105件
+    #
+    # 35 + 35 + 35
+    # --------------------------------------------------------
+
+    x_train_all = np.vstack(
+        train_feature_arrays
+    )
+
+    # --------------------------------------------------------
+    # TRAIN105件の平均
+    # --------------------------------------------------------
+
+    scaler_mean = x_train_all.mean(
+        axis=0
+    )
+
+    # --------------------------------------------------------
+    # TRAIN105件の標準偏差
+    #
+    # ddof=0
+    # StandardScalerと同じ定義
+    # --------------------------------------------------------
+
+    scaler_scale = x_train_all.std(
+        axis=0,
+        ddof=0,
+    )
+
+    if np.any(
+        scaler_scale == 0
+    ):
+        raise ValueError(
+            "Standard deviation is zero "
+            "for at least one feature."
+        )
+
+    # --------------------------------------------------------
+    # TEST32件にも
+    # TRAIN105件と同じmean / scaleを適用
+    # --------------------------------------------------------
+
+    x_test = apply_zscore(
+        x_test,
+        scaler_mean,
+        scaler_scale,
+    )
+
+
+elif standardization != "none":
+
+    raise ValueError(
+        f"Unknown standardization: "
+        f"{standardization}"
+    )
 
     # ========================================================
     # 今回の実験条件
@@ -236,6 +343,17 @@ def main(
 
         "test_data_path": (
             str(test_csv)
+        ),
+        "scaler_fit_scope": (
+            "train_105_only"
+        ),
+
+        "scaler_ddof": (
+           0
+        ),
+
+        "target_standardization": (
+           "none"
         ),
     }
 
