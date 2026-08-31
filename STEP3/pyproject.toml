@@ -38,8 +38,6 @@ clientapp = "client_app:app"
 
 
 [tool.flwr.app.config]
-
-experiment-id = "exp_001_no_scaling_baseline"
 standardization = "none"
 
 # Federated Learning
