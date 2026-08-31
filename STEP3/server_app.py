@@ -1,14 +1,9 @@
 from pathlib import Path
+import json
 
+import numpy as np
 import pandas as pd
 import torch
-import json
-import numpy as np
-
-# ============================================================
-# matplotlib
-# Ubuntuでも画面表示なしでPNG保存できるようにする
-# ============================================================
 
 import matplotlib
 
@@ -29,7 +24,9 @@ from flwr.serverapp import (
     ServerApp,
 )
 
-from flwr.serverapp.strategy import FedAvg
+from flwr.serverapp.strategy import (
+    FedAvg,
+)
 
 
 from model import CoFDNN
@@ -66,13 +63,13 @@ def main(
 ) -> None:
 
     # ========================================================
-    # 再現性のため乱数seed固定
+    # Seed
     # ========================================================
 
     set_seed()
 
     # ========================================================
-    # pyproject.tomlから実験条件を取得
+    # pyproject.tomlから条件取得
     # ========================================================
 
     num_rounds = int(
@@ -113,18 +110,6 @@ def main(
         )
     )
 
-    # ========================================================
-    # 標準化方式
-    #
-    # 現在:
-    #   none
-    #
-    # Z-score版では:
-    #   zscore
-    #
-    # とする予定
-    # ========================================================
-
     standardization = str(
         context.run_config.get(
             "standardization",
@@ -133,140 +118,161 @@ def main(
     )
 
     # ========================================================
-    # STEP3フォルダ
+    # STEP3本体のディレクトリ
+    #
+    # test.csv
+    #   parents[0] = splits
+    #   parents[1] = data
+    #   parents[2] = STEP3
     # ========================================================
 
-    base_dir = test_csv.parents[2]
+    base_dir = (
+        test_csv.parents[2]
+    )
 
     # ========================================================
-    # TEST32件を読み込む
-    #
-    # 現在の標準化なし版では
-    # 生の特徴量をそのまま使用
+    # TEST32件
     # ========================================================
 
-    x_test, y_test, test_df = load_csv_data(
-        test_csv
+    x_test, y_test, test_df = (
+        load_csv_data(
+            test_csv
+        )
     )
-    # ============================================================
-# Z-score用パラメータ
-# ============================================================
 
-scaler_mean = None
-scaler_scale = None
+    # ========================================================
+    # Z-score用パラメータ
+    # ========================================================
 
+    scaler_mean = None
+    scaler_scale = None
 
-# ============================================================
-# Z-score標準化
-#
-# Client1～3のTRAIN105件のみから
-# 共通mean / scaleを計算する
-#
-# TEST32件は計算に使用しない
-# ============================================================
-
-if standardization == "zscore":
-
-    split_dir = test_csv.parent
-
-    train_feature_arrays = []
-
-    for client_id in range(
-        1,
-        4,
-    ):
-
-        client_csv = (
-            split_dir
-            / f"client{client_id}_train.csv"
-        )
-
-        client_df = pd.read_csv(
-            client_csv
-        )
-
-        client_x = client_df[
-            FEATURE_COLUMNS
-        ].to_numpy(
-            dtype=np.float64
-        )
-
-        train_feature_arrays.append(
-            client_x
-        )
-
-    # --------------------------------------------------------
-    # TRAIN105件
+    # ========================================================
+    # Z-score
     #
-    # 35 + 35 + 35
-    # --------------------------------------------------------
-
-    x_train_all = np.vstack(
-        train_feature_arrays
-    )
-
-    # --------------------------------------------------------
-    # TRAIN105件の平均
-    # --------------------------------------------------------
-
-    scaler_mean = x_train_all.mean(
-        axis=0
-    )
-
-    # --------------------------------------------------------
-    # TRAIN105件の標準偏差
+    # Client1～3のTRAIN105件だけから
+    # mean / scaleを計算
     #
-    # ddof=0
-    # StandardScalerと同じ定義
-    # --------------------------------------------------------
+    # TEST32は計算に使わない
+    # ========================================================
 
-    scaler_scale = x_train_all.std(
-        axis=0,
-        ddof=0,
-    )
+    if standardization == "zscore":
 
-    if np.any(
-        scaler_scale == 0
-    ):
+        split_dir = (
+            test_csv.parent
+        )
+
+        train_feature_arrays = []
+
+        for client_id in range(
+            1,
+            4,
+        ):
+
+            client_csv = (
+                split_dir
+                / f"client{client_id}_train.csv"
+            )
+
+            client_df = pd.read_csv(
+                client_csv
+            )
+
+            client_x = (
+                client_df[
+                    FEATURE_COLUMNS
+                ]
+                .to_numpy(
+                    dtype=np.float64
+                )
+            )
+
+            train_feature_arrays.append(
+                client_x
+            )
+
+        # ----------------------------------------------------
+        # 35 + 35 + 35 = 105件
+        # ----------------------------------------------------
+
+        x_train_all = np.vstack(
+            train_feature_arrays
+        )
+
+        # ----------------------------------------------------
+        # TRAIN105件の平均
+        # ----------------------------------------------------
+
+        scaler_mean = (
+            x_train_all.mean(
+                axis=0
+            )
+        )
+
+        # ----------------------------------------------------
+        # TRAIN105件の標準偏差
+        #
+        # ddof=0
+        # sklearn StandardScalerと同じ定義
+        # ----------------------------------------------------
+
+        scaler_scale = (
+            x_train_all.std(
+                axis=0,
+                ddof=0,
+            )
+        )
+
+        if np.any(
+            scaler_scale == 0
+        ):
+
+            raise ValueError(
+                "Standard deviation is zero "
+                "for at least one feature."
+            )
+
+        # ----------------------------------------------------
+        # TEST32件にも同じmean/scaleを適用
+        # ----------------------------------------------------
+
+        x_test = apply_zscore(
+            x_test,
+            scaler_mean,
+            scaler_scale,
+        )
+
+    elif standardization != "none":
+
         raise ValueError(
-            "Standard deviation is zero "
-            "for at least one feature."
+            f"Unknown standardization: "
+            f"{standardization}"
         )
 
-    # --------------------------------------------------------
-    # TEST32件にも
-    # TRAIN105件と同じmean / scaleを適用
-    # --------------------------------------------------------
-
-    x_test = apply_zscore(
-        x_test,
-        scaler_mean,
-        scaler_scale,
-    )
-
-
-elif standardization != "none":
-
-    raise ValueError(
-        f"Unknown standardization: "
-        f"{standardization}"
-    )
-
     # ========================================================
-    # 今回の実験条件
-    #
-    # config.csvとして保存される
-    #
-    # experiment_idはここでは指定しない。
-    # experiment_utils.py側で
-    # exp_001, exp_002, ...
-    # と自動採番する。
+    # 実験条件
     # ========================================================
 
     experiment_config = {
 
         "standardization": (
             standardization
+        ),
+
+        "scaler_fit_scope": (
+            "train_105_only"
+            if standardization == "zscore"
+            else "none"
+        ),
+
+        "scaler_ddof": (
+            0
+            if standardization == "zscore"
+            else "none"
+        ),
+
+        "target_standardization": (
+            "none"
         ),
 
         "model": (
@@ -344,41 +350,19 @@ elif standardization != "none":
         "test_data_path": (
             str(test_csv)
         ),
-        "scaler_fit_scope": (
-            "train_105_only"
-        ),
-
-        "scaler_ddof": (
-           0
-        ),
-
-        "target_standardization": (
-           "none"
-        ),
     }
 
     # ========================================================
-    # 実験フォルダを自動作成
-    #
-    # 例:
-    #
-    # experiments/
-    # └── exp_001/
-    #     ├── config.csv
-    #     ├── code_snapshot/
-    #     └── results/
-    #
-    # 次回は自動的にexp_002になる。
+    # exp_001, exp_002...
+    # 自動採番
     # ========================================================
 
-    experiment_info = initialize_experiment(
-        base_dir=base_dir,
-        config=experiment_config,
+    experiment_info = (
+        initialize_experiment(
+            base_dir=base_dir,
+            config=experiment_config,
+        )
     )
-
-    # ========================================================
-    # 自動採番されたExperiment ID
-    # ========================================================
 
     experiment_id = str(
         experiment_info[
@@ -386,46 +370,41 @@ elif standardization != "none":
         ]
     )
 
-    # ========================================================
-    # 今回の実験専用resultsフォルダ
-    # ========================================================
-
     result_dir = Path(
         experiment_info[
             "result_dir"
         ]
     )
-    # ============================================================
-# Z-scoreパラメータ保存
-# ============================================================
 
-if standardization == "zscore":
+    # ========================================================
+    # Z-scoreパラメータ保存
+    # ========================================================
 
-    scaler_df = pd.DataFrame(
-        {
-            "feature": (
-                FEATURE_COLUMNS
-            ),
+    if standardization == "zscore":
 
-            "mean": (
-                scaler_mean
-            ),
+        scaler_df = pd.DataFrame(
+            {
+                "feature": (
+                    FEATURE_COLUMNS
+                ),
+                "mean": (
+                    scaler_mean
+                ),
+                "scale": (
+                    scaler_scale
+                ),
+            }
+        )
 
-            "scale": (
-                scaler_scale
-            ),
-        }
-    )
+        scaler_csv_path = (
+            result_dir
+            / "scaler_parameters.csv"
+        )
 
-    scaler_csv_path = (
-        result_dir
-        / "scaler_parameters.csv"
-    )
-
-    scaler_df.to_csv(
-        scaler_csv_path,
-        index=False,
-    )
+        scaler_df.to_csv(
+            scaler_csv_path,
+            index=False,
+        )
 
     # ========================================================
     # 実験開始表示
@@ -444,59 +423,63 @@ if standardization == "zscore":
     )
 
     print(
-        f"Experiment ID  : "
+        f"Experiment ID   : "
         f"{experiment_id}"
     )
 
     print(
-        f"Standardization: "
+        f"Standardization : "
         f"{standardization}"
     )
 
     print(
-        f"Test samples   : "
+        f"Test samples    : "
         f"{len(x_test)}"
     )
 
     print(
-        f"Rounds         : "
+        f"Rounds          : "
         f"{num_rounds}"
     )
 
     print(
-        f"Local epochs   : "
+        f"Local epochs    : "
         f"{local_epochs}"
     )
 
     print(
-        f"Batch size     : "
+        f"Batch size      : "
         f"{batch_size}"
     )
 
     print(
-        f"Learning rate  : "
+        f"Learning rate   : "
         f"{learning_rate}"
     )
 
     print(
-        f"Result dir     : "
+        f"Result dir      : "
         f"{result_dir}"
     )
 
     print()
 
     # ========================================================
-    # Global DNN初期化
+    # Global model
     # ========================================================
 
-    global_model = CoFDNN()
+    global_model = (
+        CoFDNN()
+    )
 
-    initial_arrays = ArrayRecord(
-        global_model.state_dict()
+    initial_arrays = (
+        ArrayRecord(
+            global_model.state_dict()
+        )
     )
 
     # ========================================================
-    # RoundごとのGlobal評価指標
+    # Global評価履歴
     # ========================================================
 
     metric_history = []
@@ -507,13 +490,7 @@ if standardization == "zscore":
     )
 
     # ========================================================
-    # Global model評価関数
-    #
-    # Round 0
-    #   FL開始前
-    #
-    # Round 1～
-    #   FedAvg後のGlobal model
+    # Global評価
     # ========================================================
 
     def global_evaluate(
@@ -521,29 +498,19 @@ if standardization == "zscore":
         arrays: ArrayRecord,
     ) -> MetricRecord:
 
-        # ----------------------------------------------------
-        # Global model作成
-        # ----------------------------------------------------
-
         model = CoFDNN()
 
         model.load_state_dict(
             arrays.to_torch_state_dict()
         )
 
-        # ----------------------------------------------------
-        # TEST32件で評価
-        # ----------------------------------------------------
-
-        metrics, _ = evaluate_model(
-            model,
-            x_test,
-            y_test,
+        metrics, _ = (
+            evaluate_model(
+                model,
+                x_test,
+                y_test,
+            )
         )
-
-        # ----------------------------------------------------
-        # Roundごとの結果
-        # ----------------------------------------------------
 
         row = {
 
@@ -581,10 +548,7 @@ if standardization == "zscore":
         )
 
         # ----------------------------------------------------
-        # 毎Round CSV保存
-        #
-        # 途中で実験が停止しても
-        # そこまでの結果を残す
+        # Roundごとに保存
         # ----------------------------------------------------
 
         pd.DataFrame(
@@ -593,10 +557,6 @@ if standardization == "zscore":
             metrics_csv_path,
             index=False,
         )
-
-        # ----------------------------------------------------
-        # ターミナル表示
-        # ----------------------------------------------------
 
         print(
             f"Global Round "
@@ -610,10 +570,6 @@ if standardization == "zscore":
             f"R2="
             f"{metrics['r2']:.8f}"
         )
-
-        # ----------------------------------------------------
-        # FlowerへMetricRecordを返す
-        # ----------------------------------------------------
 
         return MetricRecord(
             {
@@ -654,17 +610,7 @@ if standardization == "zscore":
             fraction_train
         ),
 
-        # ----------------------------------------------------
-        # Client側でTEST評価はしない
-        #
-        # 共通TEST32件をServer側で評価
-        # ----------------------------------------------------
-
         fraction_evaluate=0.0,
-
-        # ----------------------------------------------------
-        # 毎Round3 Client全て参加
-        # ----------------------------------------------------
 
         min_train_nodes=3,
 
@@ -672,57 +618,51 @@ if standardization == "zscore":
     )
 
     # ========================================================
-    # Clientへ送るローカル学習条件
+    # Clientへ送る設定
     # ========================================================
 
-    # ============================================================
-# Clientへ送る学習条件
-# ============================================================
+    train_config_dict = {
 
-train_config_dict = {
+        "learning-rate": (
+            learning_rate
+        ),
 
-    "learning-rate": (
-        learning_rate
-    ),
+        "local-epochs": (
+            local_epochs
+        ),
 
-    "local-epochs": (
-        local_epochs
-    ),
+        "batch-size": (
+            batch_size
+        ),
 
-    "batch-size": (
-        batch_size
-    ),
+        "standardization": (
+            standardization
+        ),
+    }
 
-    "standardization": (
-        standardization
-    ),
-}
+    # ========================================================
+    # Z-scoreの場合
+    #
+    # 全Clientへ同じmean / scaleを送信
+    # ========================================================
 
+    if standardization == "zscore":
 
-# ============================================================
-# Z-scoreの場合
-#
-# 全Clientへ同じmean / scaleを送る
-# ============================================================
+        train_config_dict[
+            "zscore-mean-json"
+        ] = json.dumps(
+            scaler_mean.tolist()
+        )
 
-if standardization == "zscore":
+        train_config_dict[
+            "zscore-scale-json"
+        ] = json.dumps(
+            scaler_scale.tolist()
+        )
 
-    train_config_dict[
-        "zscore-mean-json"
-    ] = json.dumps(
-        scaler_mean.tolist()
+    train_config = ConfigRecord(
+        train_config_dict
     )
-
-    train_config_dict[
-        "zscore-scale-json"
-    ] = json.dumps(
-        scaler_scale.tolist()
-    )
-
-
-train_config = ConfigRecord(
-    train_config_dict
-)
 
     # ========================================================
     # Federated Learning開始
@@ -732,13 +672,21 @@ train_config = ConfigRecord(
 
         grid=grid,
 
-        initial_arrays=initial_arrays,
+        initial_arrays=(
+            initial_arrays
+        ),
 
-        train_config=train_config,
+        train_config=(
+            train_config
+        ),
 
-        num_rounds=num_rounds,
+        num_rounds=(
+            num_rounds
+        ),
 
-        evaluate_fn=global_evaluate,
+        evaluate_fn=(
+            global_evaluate
+        ),
     )
 
     # ========================================================
@@ -746,11 +694,12 @@ train_config = ConfigRecord(
     # ========================================================
 
     final_state_dict = (
-        result.arrays.to_torch_state_dict()
+        result.arrays
+        .to_torch_state_dict()
     )
 
     # ========================================================
-    # 学習済みGlobal model保存
+    # Global model保存
     # ========================================================
 
     model_path = (
@@ -764,19 +713,18 @@ train_config = ConfigRecord(
     )
 
     # ========================================================
-    # Client側Training Loss
-    #
-    # 3 Clientから返されたtrain_lossを
-    # Flowerがnum-examplesで集約
-    #
-    # 今回は35・35・35なので
-    # 実質的に3 Clientの平均
+    # Client train loss
     # ========================================================
 
     train_loss_rows = []
 
-    for server_round, metrics in sorted(
-        result.train_metrics_clientapp.items()
+    for (
+        server_round,
+        metrics,
+    ) in sorted(
+        result
+        .train_metrics_clientapp
+        .items()
     ):
 
         train_loss_rows.append(
@@ -794,10 +742,6 @@ train_config = ConfigRecord(
             }
         )
 
-    # ========================================================
-    # Train Loss CSV保存
-    # ========================================================
-
     train_loss_csv_path = (
         result_dir
         / "client_train_loss.csv"
@@ -811,56 +755,55 @@ train_config = ConfigRecord(
     )
 
     # ========================================================
-    # 最終Global modelをTEST32件で評価
+    # 最終Global model評価
     # ========================================================
 
-    final_model = CoFDNN()
+    final_model = (
+        CoFDNN()
+    )
 
     final_model.load_state_dict(
         final_state_dict
     )
 
-    final_metrics, final_predictions = (
-        evaluate_model(
-            final_model,
-            x_test,
-            y_test,
+    (
+        final_metrics,
+        final_predictions,
+    ) = evaluate_model(
+        final_model,
+        x_test,
+        y_test,
+    )
+
+    # ========================================================
+    # TEST予測結果
+    # ========================================================
+
+    prediction_df = (
+        pd.DataFrame(
+            {
+
+                "data_id": (
+                    test_df[
+                        "data_id"
+                    ]
+                ),
+
+                "actual_cof": (
+                    test_df[
+                        TARGET_COLUMN
+                    ]
+                ),
+
+                "predicted_cof": (
+                    final_predictions
+                ),
+            }
         )
     )
 
     # ========================================================
-    # TEST32件
-    #
-    # Actual CoF
-    # Predicted CoF
-    # ========================================================
-
-    prediction_df = pd.DataFrame(
-        {
-
-            "data_id": (
-                test_df[
-                    "data_id"
-                ]
-            ),
-
-            "actual_cof": (
-                test_df[
-                    TARGET_COLUMN
-                ]
-            ),
-
-            "predicted_cof": (
-                final_predictions
-            ),
-        }
-    )
-
-    # ========================================================
     # 残差
-    #
-    # residual
-    # = Actual - Predicted
     # ========================================================
 
     prediction_df[
@@ -878,10 +821,6 @@ train_config = ConfigRecord(
         ]
     )
 
-    # ========================================================
-    # TEST予測CSV保存
-    # ========================================================
-
     prediction_csv_path = (
         result_dir
         / "test_predictions.csv"
@@ -893,27 +832,20 @@ train_config = ConfigRecord(
     )
 
     # ========================================================
-    # Actual CoF vs Predicted CoF
-    #
-    # TEST32件
-    # 散布図
-    #
-    # ＋
-    #
-    # 理想線 y=x
+    # Actual vs Predicted
     # ========================================================
 
-    actual = prediction_df[
-        "actual_cof"
-    ].to_numpy()
+    actual = (
+        prediction_df[
+            "actual_cof"
+        ].to_numpy()
+    )
 
-    predicted = prediction_df[
-        "predicted_cof"
-    ].to_numpy()
-
-    # ========================================================
-    # x軸・y軸の共通範囲
-    # ========================================================
+    predicted = (
+        prediction_df[
+            "predicted_cof"
+        ].to_numpy()
+    )
 
     plot_min = min(
         actual.min(),
@@ -930,27 +862,16 @@ train_config = ConfigRecord(
         - plot_min
     ) * 0.05
 
-    plot_min = (
-        plot_min
-        - margin
-    )
-
-    plot_max = (
-        plot_max
-        + margin
-    )
+    plot_min -= margin
+    plot_max += margin
 
     # ========================================================
-    # Scatter plot
+    # Scatter
     # ========================================================
 
     plt.figure(
         figsize=(6, 6)
     )
-
-    # --------------------------------------------------------
-    # TEST32件
-    # --------------------------------------------------------
 
     plt.scatter(
         actual,
@@ -958,9 +879,9 @@ train_config = ConfigRecord(
         s=50,
     )
 
-    # --------------------------------------------------------
-    # 理想線 y=x
-    # --------------------------------------------------------
+    # ========================================================
+    # y=x
+    # ========================================================
 
     plt.plot(
         [
@@ -971,15 +892,9 @@ train_config = ConfigRecord(
             plot_min,
             plot_max,
         ],
-
         linestyle="--",
-
         label="y = x",
     )
-
-    # ========================================================
-    # 軸
-    # ========================================================
 
     plt.xlabel(
         "Actual CoF"
@@ -989,24 +904,13 @@ train_config = ConfigRecord(
         "Predicted CoF"
     )
 
-    # ========================================================
-    # タイトル
-    #
-    # Experiment ID
-    # R²
-    # を表示
-    # ========================================================
-
     plt.title(
         "Actual vs Predicted CoF\n"
         f"{experiment_id}, "
+        f"{standardization}, "
         f"R² = "
         f"{final_metrics['r2']:.3f}"
     )
-
-    # ========================================================
-    # x軸・y軸を同じ範囲にする
-    # ========================================================
 
     plt.xlim(
         plot_min,
@@ -1017,13 +921,6 @@ train_config = ConfigRecord(
         plot_min,
         plot_max,
     )
-
-    # ========================================================
-    # x軸・y軸の縮尺を1:1
-    #
-    # y=xからの距離を
-    # 正しく視覚化するため
-    # ========================================================
 
     plt.gca().set_aspect(
         "equal",
@@ -1037,10 +934,6 @@ train_config = ConfigRecord(
     plt.legend()
 
     plt.tight_layout()
-
-    # ========================================================
-    # PNG保存
-    # ========================================================
 
     scatter_path = (
         result_dir
@@ -1056,47 +949,45 @@ train_config = ConfigRecord(
     plt.close()
 
     # ========================================================
-    # 最終評価指標
+    # 最終評価CSV
     # ========================================================
 
-    final_metrics_df = pd.DataFrame(
-        [
-            {
+    final_metrics_df = (
+        pd.DataFrame(
+            [
+                {
 
-                "round": (
-                    num_rounds
-                ),
+                    "round": (
+                        num_rounds
+                    ),
 
-                "mse": float(
-                    final_metrics[
-                        "mse"
-                    ]
-                ),
+                    "mse": float(
+                        final_metrics[
+                            "mse"
+                        ]
+                    ),
 
-                "rmse": float(
-                    final_metrics[
-                        "rmse"
-                    ]
-                ),
+                    "rmse": float(
+                        final_metrics[
+                            "rmse"
+                        ]
+                    ),
 
-                "mae": float(
-                    final_metrics[
-                        "mae"
-                    ]
-                ),
+                    "mae": float(
+                        final_metrics[
+                            "mae"
+                        ]
+                    ),
 
-                "r2": float(
-                    final_metrics[
-                        "r2"
-                    ]
-                ),
-            }
-        ]
+                    "r2": float(
+                        final_metrics[
+                            "r2"
+                        ]
+                    ),
+                }
+            ]
+        )
     )
-
-    # ========================================================
-    # 最終評価CSV保存
-    # ========================================================
 
     final_metrics_csv_path = (
         result_dir
@@ -1167,6 +1058,12 @@ train_config = ConfigRecord(
     print(
         model_path
     )
+
+    if standardization == "zscore":
+
+        print(
+            scaler_csv_path
+        )
 
     print()
 
