@@ -395,6 +395,37 @@ elif standardization != "none":
             "result_dir"
         ]
     )
+    # ============================================================
+# Z-scoreパラメータ保存
+# ============================================================
+
+if standardization == "zscore":
+
+    scaler_df = pd.DataFrame(
+        {
+            "feature": (
+                FEATURE_COLUMNS
+            ),
+
+            "mean": (
+                scaler_mean
+            ),
+
+            "scale": (
+                scaler_scale
+            ),
+        }
+    )
+
+    scaler_csv_path = (
+        result_dir
+        / "scaler_parameters.csv"
+    )
+
+    scaler_df.to_csv(
+        scaler_csv_path,
+        index=False,
+    )
 
     # ========================================================
     # 実験開始表示
@@ -644,22 +675,54 @@ elif standardization != "none":
     # Clientへ送るローカル学習条件
     # ========================================================
 
-    train_config = ConfigRecord(
-        {
+    # ============================================================
+# Clientへ送る学習条件
+# ============================================================
 
-            "learning-rate": (
-                learning_rate
-            ),
+train_config_dict = {
 
-            "local-epochs": (
-                local_epochs
-            ),
+    "learning-rate": (
+        learning_rate
+    ),
 
-            "batch-size": (
-                batch_size
-            ),
-        }
+    "local-epochs": (
+        local_epochs
+    ),
+
+    "batch-size": (
+        batch_size
+    ),
+
+    "standardization": (
+        standardization
+    ),
+}
+
+
+# ============================================================
+# Z-scoreの場合
+#
+# 全Clientへ同じmean / scaleを送る
+# ============================================================
+
+if standardization == "zscore":
+
+    train_config_dict[
+        "zscore-mean-json"
+    ] = json.dumps(
+        scaler_mean.tolist()
     )
+
+    train_config_dict[
+        "zscore-scale-json"
+    ] = json.dumps(
+        scaler_scale.tolist()
+    )
+
+
+train_config = ConfigRecord(
+    train_config_dict
+)
 
     # ========================================================
     # Federated Learning開始
