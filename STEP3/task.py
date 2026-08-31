@@ -38,6 +38,72 @@ BATCH_SIZE = 7
 LOCAL_EPOCHS = 10
 LEARNING_RATE = 0.001
 
+# ============================================================
+# Z-score標準化
+# ============================================================
+
+def apply_zscore(
+    x,
+    mean,
+    scale,
+):
+    """
+    共通の平均・標準偏差を使って
+    特徴量をZ-score標準化する。
+
+    CoF（目的変数）はここでは標準化しない。
+    """
+
+    x = np.asarray(
+        x,
+        dtype=np.float32,
+    )
+
+    mean = np.asarray(
+        mean,
+        dtype=np.float32,
+    )
+
+    scale = np.asarray(
+        scale,
+        dtype=np.float32,
+    )
+
+    # --------------------------------------------------------
+    # 特徴量数が一致しているか確認
+    # --------------------------------------------------------
+
+    if mean.shape[0] != x.shape[1]:
+        raise ValueError(
+            "Z-score mean size does not match "
+            "the number of features."
+        )
+
+    if scale.shape[0] != x.shape[1]:
+        raise ValueError(
+            "Z-score scale size does not match "
+            "the number of features."
+        )
+
+    # --------------------------------------------------------
+    # 標準偏差0の特徴量がある場合は停止
+    # --------------------------------------------------------
+
+    if np.any(scale == 0):
+        raise ValueError(
+            "Standard deviation is zero "
+            "for at least one feature."
+        )
+
+    x_scaled = (
+        x
+        - mean
+    ) / scale
+
+    return x_scaled.astype(
+        np.float32
+    )
+
 
 # ============================================================
 # 乱数seedを固定
