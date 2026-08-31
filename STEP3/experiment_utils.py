@@ -13,6 +13,7 @@ CODE_FILES = [
     "task.py",
     "client_app.py",
     "server_app.py",
+    "experiment_utils.py",
     "pyproject.toml",
 ]
 
