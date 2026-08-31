@@ -1,3 +1,6 @@
+import json
+import numpy as np
+
 from pathlib import Path
 
 from flwr.app import (
@@ -16,6 +19,7 @@ from task import (
     load_csv_data,
     set_seed,
     train_model,
+    apply_zscore,
 )
 
 
@@ -136,6 +140,60 @@ def train(
 
     x_train, y_train, _ = load_csv_data(
         train_csv
+    )
+    # ============================================================
+# 標準化方式
+# ============================================================
+
+standardization = str(
+    train_config.get(
+        "standardization",
+        "none",
+    )
+)
+
+# ============================================================
+# Z-score標準化
+#
+# Serverから受け取った
+# 共通mean / scaleを全Clientで使用する
+# ============================================================
+
+if standardization == "zscore":
+
+    scaler_mean = np.asarray(
+        json.loads(
+            str(
+                train_config[
+                    "zscore-mean-json"
+                ]
+            )
+        ),
+        dtype=np.float32,
+    )
+
+    scaler_scale = np.asarray(
+        json.loads(
+            str(
+                train_config[
+                    "zscore-scale-json"
+                ]
+            )
+        ),
+        dtype=np.float32,
+    )
+
+    x_train = apply_zscore(
+        x_train,
+        scaler_mean,
+        scaler_scale,
+    )
+
+elif standardization != "none":
+
+    raise ValueError(
+        f"Unknown standardization: "
+        f"{standardization}"
     )
 
     # --------------------------------------------------------
