@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 import csv
+import re
 import shutil
 
 
@@ -19,19 +20,102 @@ CODE_FILES = [
 
 
 # ============================================================
+# 次の実験番号を自動取得
+# ============================================================
+
+def get_next_experiment_id(base_dir):
+    """
+    experimentsフォルダを確認し、
+
+    exp_001
+    exp_002
+    exp_003
+
+    のような既存実験番号から、
+    次の番号を自動的に決める。
+    """
+
+    experiments_dir = (
+        Path(base_dir)
+        / "experiments"
+    )
+
+    experiments_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    experiment_numbers = []
+
+    # --------------------------------------------------------
+    # exp_001 のような名前だけを探す
+    # test_experimentなどは無視する
+    # --------------------------------------------------------
+
+    pattern = re.compile(
+        r"^exp_(\d{3})$"
+    )
+
+    for path in experiments_dir.iterdir():
+
+        if not path.is_dir():
+            continue
+
+        match = pattern.match(
+            path.name
+        )
+
+        if match:
+
+            experiment_numbers.append(
+                int(
+                    match.group(1)
+                )
+            )
+
+    # --------------------------------------------------------
+    # まだ実験がなければexp_001
+    # --------------------------------------------------------
+
+    if not experiment_numbers:
+
+        next_number = 1
+
+    else:
+
+        next_number = (
+            max(experiment_numbers)
+            + 1
+        )
+
+    experiment_id = (
+        f"exp_{next_number:03d}"
+    )
+
+    return experiment_id
+
+
+# ============================================================
 # 実験フォルダを作成
 # ============================================================
 
 def create_experiment_directory(
     base_dir,
-    experiment_id,
 ):
-    """
-    例:
-    experiments/
-        exp_002_zscore_baseline/
-            run_20260831_171500/
-    """
+
+    # --------------------------------------------------------
+    # 実験番号を自動決定
+    # --------------------------------------------------------
+
+    experiment_id = (
+        get_next_experiment_id(
+            base_dir
+        )
+    )
+
+    # --------------------------------------------------------
+    # 実行時刻
+    # --------------------------------------------------------
 
     timestamp = datetime.now().strftime(
         "%Y%m%d_%H%M%S"
@@ -41,7 +125,6 @@ def create_experiment_directory(
         Path(base_dir)
         / "experiments"
         / experiment_id
-        / f"run_{timestamp}"
     )
 
     result_dir = (
@@ -65,6 +148,8 @@ def create_experiment_directory(
     )
 
     return (
+        experiment_id,
+        timestamp,
         experiment_dir,
         result_dir,
         code_dir,
@@ -159,22 +244,36 @@ def save_code_snapshot(
 
 
 # ============================================================
-# 実験開始時の保存処理をまとめる
+# 実験開始時の保存処理
 # ============================================================
 
 def initialize_experiment(
     base_dir,
-    experiment_id,
     config,
 ):
 
     (
+        experiment_id,
+        timestamp,
         experiment_dir,
         result_dir,
         code_dir,
     ) = create_experiment_directory(
-        base_dir,
-        experiment_id,
+        base_dir
+    )
+
+    # --------------------------------------------------------
+    # 自動生成された情報をconfigにも記録
+    # --------------------------------------------------------
+
+    config = dict(config)
+
+    config["experiment_id"] = (
+        experiment_id
+    )
+
+    config["run_timestamp"] = (
+        timestamp
     )
 
     config_path = save_experiment_config(
@@ -204,6 +303,11 @@ def initialize_experiment(
     )
 
     print(
+        f"Run timestamp : "
+        f"{timestamp}"
+    )
+
+    print(
         f"Experiment dir: "
         f"{experiment_dir}"
     )
@@ -223,6 +327,7 @@ def initialize_experiment(
     )
 
     for file_path in copied_files:
+
         print(
             f"  {file_path.name}"
         )
@@ -230,6 +335,12 @@ def initialize_experiment(
     print()
 
     return {
+        "experiment_id": (
+            experiment_id
+        ),
+        "timestamp": (
+            timestamp
+        ),
         "experiment_dir": (
             experiment_dir
         ),
@@ -246,7 +357,7 @@ def initialize_experiment(
 
 
 # ============================================================
-# experiment_utils.py単体で動作確認
+# 単体動作確認
 # ============================================================
 
 if __name__ == "__main__":
@@ -256,36 +367,43 @@ if __name__ == "__main__":
     ).resolve().parent
 
     test_config = {
-        "experiment_id": (
-            "test_experiment"
-        ),
+
         "standardization": (
             "none"
         ),
+
         "model": (
             "5-8-4-1"
         ),
+
         "optimizer": (
             "Adam"
         ),
+
         "learning_rate": (
             0.001
         ),
+
         "batch_size": (
             7
         ),
+
         "local_epochs": (
             10
         ),
+
         "server_rounds": (
             30
         ),
+
         "num_clients": (
             3
         ),
+
         "aggregation": (
             "FedAvg"
         ),
+
         "seed": (
             42
         ),
@@ -293,6 +411,5 @@ if __name__ == "__main__":
 
     initialize_experiment(
         base_dir,
-        "test_experiment",
         test_config,
     )
