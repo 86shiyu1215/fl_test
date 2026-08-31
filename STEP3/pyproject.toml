@@ -38,7 +38,7 @@ clientapp = "client_app:app"
 
 
 [tool.flwr.app.config]
-standardization = "none"
+standardization = "zscore"
 
 # Federated Learning
 num-server-rounds = 30
