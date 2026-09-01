@@ -276,7 +276,7 @@ def main(
         ),
 
         "model": (
-            "5-8-4-1"
+            "5-16-8-1"
         ),
 
         "input_features": (
