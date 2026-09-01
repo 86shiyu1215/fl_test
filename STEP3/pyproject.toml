@@ -41,7 +41,7 @@ clientapp = "client_app:app"
 standardization = "zscore"
 
 # Federated Learning
-num-server-rounds = 30
+num-server-rounds = 60
 fraction-train = 1.0
 
 # Local DNN training
