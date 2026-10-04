@@ -42,12 +42,15 @@ def main(
     context: Context,
 ) -> None:
 
+    # ========================================================
+    # Run configuration
+    # ========================================================
+
     num_rounds = int(
         context.run_config[
             "num-server-rounds"
         ]
     )
-
 
     learning_rate = float(
         context.run_config[
@@ -55,13 +58,11 @@ def main(
         ]
     )
 
-
     batch_size = int(
         context.run_config[
             "batch-size"
         ]
     )
-
 
     local_epochs = int(
         context.run_config[
@@ -69,20 +70,17 @@ def main(
         ]
     )
 
-
     seed = int(
         context.run_config[
             "seed"
         ]
     )
 
-
     num_clients = int(
         context.run_config[
             "num-clients"
         ]
     )
-
 
     data_dir = Path(
         str(
@@ -92,7 +90,6 @@ def main(
         )
     ).resolve()
 
-
     test_csv = Path(
         str(
             context.run_config[
@@ -101,16 +98,18 @@ def main(
         )
     ).resolve()
 
-
+# test.csv -> splits -> data -> 1002_no1
     base_dir = (
         test_csv.parents[2]
     )
 
+    # ========================================================
+    # Reproducibility
+    # ========================================================
 
     set_seed(
         seed
     )
-
 
     # ========================================================
     # Client sample sizes
@@ -118,31 +117,32 @@ def main(
 
     client_sizes = []
 
-
     for client_id in range(
         1,
         num_clients + 1,
     ):
 
-        client_df = pd.read_csv(
+        client_csv = (
             data_dir
             / f"client{client_id}_train.csv"
         )
 
+        client_df = pd.read_csv(
+            client_csv
+        )
 
         client_sizes.append(
             len(client_df)
         )
 
-
     # ========================================================
-    # Test
+    # Load Test data
+    # 1002_no1では追加Z-score標準化は行わない
     # ========================================================
 
     test_df, x_test, y_test = load_xy(
         test_csv
     )
-
 
     # ========================================================
     # Experiment folder
@@ -216,7 +216,6 @@ def main(
             ),
     }
 
-
     (
         experiment_id,
         experiment_dir,
@@ -225,7 +224,6 @@ def main(
         base_dir=base_dir,
         config=experiment_config,
     )
-
 
     print(
         "========================================"
@@ -244,33 +242,34 @@ def main(
         "========================================"
     )
 
-
     # ========================================================
-    # Initial model
+    # Initial global model
     # ========================================================
 
     set_seed(
         seed
     )
 
-
     global_model = CoFDNN()
-
 
     initial_arrays = ArrayRecord(
         global_model.state_dict()
     )
 
+    # ========================================================
+    # Server-side evaluation history
+    # latest_state_dictに各RoundのGlobal modelを保持する
+    # ========================================================
 
     server_history = []
 
+    latest_state_dict = None
 
     device = torch.device(
         "cuda"
         if torch.cuda.is_available()
         else "cpu"
     )
-
 
     # ========================================================
     # Global evaluation
@@ -281,21 +280,31 @@ def main(
         arrays: ArrayRecord,
     ) -> MetricRecord:
 
-        model = CoFDNN()
+        nonlocal latest_state_dict
 
-
-        model.load_state_dict(
-            arrays.to_torch_state_dict()
+        # 評価でArrayRecordの中身を消費しない
+        state_dict = arrays.to_torch_state_dict(
+            keep_input=True
         )
 
+        # 最終Roundの重みを確実に保存できるようCPU上に複製
+        latest_state_dict = {
+            key: value.detach().cpu().clone()
+            for key, value in state_dict.items()
+        }
 
+        model = CoFDNN()
+
+        model.load_state_dict(
+            state_dict
+        )
+        
         metrics, _ = evaluate_model(
             model=model,
             x=x_test,
             y=y_test,
             device=device,
         )
-
 
         server_history.append(
             {
@@ -316,7 +325,6 @@ def main(
             }
         )
 
-
         print(
             f"Round {server_round:02d} | "
             f"MSE={metrics['mse']:.8f} | "
@@ -324,7 +332,6 @@ def main(
             f"MAE={metrics['mae']:.8f} | "
             f"R2={metrics['r2']:.8f}"
         )
-
 
         return MetricRecord(
             {
@@ -341,7 +348,6 @@ def main(
                     metrics["r2"],
             }
         )
-
 
     # ========================================================
     # FedAvg
@@ -360,6 +366,9 @@ def main(
         weighted_by_key="num-examples",
     )
 
+    # ========================================================
+    # Start Federated Learning
+    # ========================================================
 
     result = strategy.start(
 
@@ -372,26 +381,25 @@ def main(
         evaluate_fn=global_evaluate,
     )
 
-
     # ========================================================
-    # Save round metrics
+    # Save server history
     # ========================================================
 
-    pd.DataFrame(
+    server_history_df = pd.DataFrame(
         server_history
-    ).to_csv(
+    )
+
+    server_history_df.to_csv(
         results_dir
         / "server_round_metrics.csv",
         index=False,
     )
 
-
     # ========================================================
-    # Train loss
+    # Save aggregated Client train loss
     # ========================================================
 
     train_loss_rows = []
-
 
     for server_round, metrics in sorted(
         result.train_metrics_clientapp.items()
@@ -410,7 +418,6 @@ def main(
             }
         )
 
-
     pd.DataFrame(
         train_loss_rows
     ).to_csv(
@@ -419,16 +426,18 @@ def main(
         index=False,
     )
 
-
     # ========================================================
-    # Final model
+    # Final global model
+    # result.arraysを再変換せず，最終Roundで保持した重みを使う
     # ========================================================
 
-    final_state_dict = (
-        result.arrays
-        .to_torch_state_dict()
-    )
+    if latest_state_dict is None:
 
+        raise RuntimeError(
+            "Final global model was not captured."
+        )
+
+    final_state_dict = latest_state_dict
 
     torch.save(
         final_state_dict,
@@ -436,14 +445,15 @@ def main(
         / "global_model.pt",
     )
 
-
     final_model = CoFDNN()
-
 
     final_model.load_state_dict(
         final_state_dict
     )
 
+    # ========================================================
+    # Final evaluation
+    # ========================================================
 
     final_metrics, predictions = evaluate_model(
 
@@ -456,8 +466,7 @@ def main(
         device=device,
     )
 
-
-    pd.DataFrame(
+    final_metrics_df = pd.DataFrame(
         [
             {
                 "round":
@@ -484,15 +493,16 @@ def main(
                     ],
             }
         ]
-    ).to_csv(
+    )
+
+    final_metrics_df.to_csv(
         results_dir
         / "final_metrics.csv",
         index=False,
     )
 
-
     # ========================================================
-    # Predictions
+    # Test predictions
     # ========================================================
 
     prediction_df = pd.DataFrame(
@@ -505,7 +515,6 @@ def main(
         }
     )
 
-
     if "source_row" in test_df.columns:
 
         prediction_df.insert(
@@ -516,17 +525,21 @@ def main(
             ].to_numpy(),
         )
 
-
     if "reference_group" in test_df.columns:
 
+        insert_position = (
+            1
+            if "source_row" in prediction_df.columns
+            else 0
+        )
+
         prediction_df.insert(
-            1,
+            insert_position,
             "reference_group",
             test_df[
                 "reference_group"
             ].to_numpy(),
         )
-
 
     prediction_df[
         "residual"
@@ -539,22 +552,19 @@ def main(
         ]
     )
 
-
     prediction_df.to_csv(
         results_dir
         / "test_predictions.csv",
         index=False,
     )
 
-
     # ========================================================
-    # Scatter
+    # Actual vs Predicted scatter
     # ========================================================
 
     plt.figure(
         figsize=(7, 7)
     )
-
 
     plt.scatter(
         prediction_df[
@@ -565,7 +575,6 @@ def main(
         ],
     )
 
-
     min_value = min(
         prediction_df[
             "actual_cof"
@@ -575,7 +584,6 @@ def main(
         ].min(),
     )
 
-
     max_value = max(
         prediction_df[
             "actual_cof"
@@ -584,7 +592,6 @@ def main(
             "predicted_cof"
         ].max(),
     )
-
 
     plt.plot(
         [
@@ -598,25 +605,20 @@ def main(
         linestyle="--",
     )
 
-
     plt.xlabel(
         "Actual CoF"
     )
 
-
     plt.ylabel(
         "Predicted CoF"
     )
-
 
     plt.title(
         f"{experiment_id} | "
         f"R² = {final_metrics['r2']:.3f}"
     )
 
-
     plt.tight_layout()
-
 
     plt.savefig(
         results_dir
@@ -624,9 +626,11 @@ def main(
         dpi=300,
     )
 
-
     plt.close()
 
+    # ========================================================
+    # Finish
+    # ========================================================
 
     print(
         ""
