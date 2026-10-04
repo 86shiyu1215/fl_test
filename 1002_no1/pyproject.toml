@@ -42,6 +42,6 @@ batch-size = 7
 
 learning-rate = 0.001
 
-data-dir = "/home/shiyu/fl_test/STEP3/1002_no1/data/splits"
+data-dir = "/home/shiyu/fl_test/1002_no1/data/splits"
 
-test-data-path = "/home/shiyu/fl_test/STEP3/1002_no1/data/splits/test.csv"
+test-data-path = "/home/shiyu/fl_test/1002_no1/data/splits/test.csv"

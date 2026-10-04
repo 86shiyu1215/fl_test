@@ -47,8 +47,8 @@ fraction-train = 1.0
 standardization = "zscore"
 
 # Data
-data-dir = "/home/shiyu/fl_test/STEP3/1001_no1/data/splits"
-test-data-path = "/home/shiyu/fl_test/STEP3/1001_no1/data/splits/test.csv"
+data-dir = "/home/shiyu/fl_test/1001_no1/data/splits"
+test-data-path = "/home/shiyu/fl_test/1001_no1/data/splits/test.csv"
 
 
 [tool.flwr.federations]
