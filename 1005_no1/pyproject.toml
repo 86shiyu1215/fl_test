@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+
+[project]
+name = "cof-fl-1002-no1"
+version = "1.0.0"
+description = "Federated learning for CoF prediction - 1002_no1"
+requires-python = ">=3.10"
+
+dependencies = [
+    "flwr[simulation]>=1.31.0",
+    "torch",
+    "numpy",
+    "pandas",
+    "scikit-learn",
+    "matplotlib",
+]
+
+
+[tool.flwr.app]
+publisher = "shiyu"
+
+
+[tool.flwr.app.components]
+serverapp = "exp1005_no1_server_app:app"
+clientapp = "exp1005_no1_client_app:app"
+
+
+[tool.flwr.app.config]
+
+seed = 42
+
+num-clients = 2
+
+num-server-rounds = 60
+
+local-epochs = 10
+
+batch-size = 7
+
+learning-rate = 0.001
+
+data-dir = "/home/shiyu/fl_test/1005_no1/data/splits"
+
+test-data-path = "/home/shiyu/fl_test/1005_no1/data/splits/test.csv"
